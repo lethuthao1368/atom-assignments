@@ -1,0 +1,5 @@
+------------Hanoi-------------
+Temperature: 301.15
+Humidity: 94
+Pressure: 1006
+Weather Report: broken clouds
