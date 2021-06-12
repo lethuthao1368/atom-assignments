@@ -13,6 +13,8 @@ st.set_page_config(layout="wide")
 
 st.title('DataCracy ATOM Tiến Độ Lớp Học')
 with open('./env_variable.json','r') as j:
+# with open('OneDrive/Documents/GitHub/atom-assignments/streamlit/env_variable.json','r') as j:
+
     json_data = json.load(j)
 
 #SLACK_BEARER_TOKEN = os.environ.get('SLACK_BEARER_TOKEN') ## Get in setting of Streamlit Share
@@ -119,7 +121,7 @@ user_df = load_users_df()
 channel_df = load_channel_df()
 msg_df = load_msg_dict()
 
-#st.write(process_msg_data(msg_df, user_df, channel_df))
+st.write(process_msg_data(msg_df, user_df, channel_df))
 
 
 # Input
