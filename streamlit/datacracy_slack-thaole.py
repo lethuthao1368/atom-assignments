@@ -8,14 +8,18 @@ import pandas as pd
 import numpy as np
 import re
 from datetime import datetime as dt
+# for chart
+pd.plotting.register_matplotlib_converters()
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import seaborn as sns
+
+
 
 st.set_page_config(layout="wide")
 
 st.title('DataCracy ATOM Tiến Độ Lớp Học')
 with open('env_variable.json','r') as j:
-# with open('./env_variable.json','r') as j:
-# with open('OneDrive/Documents/GitHub/atom-assignments/streamlit/env_variable.json','r') as j:
-
     json_data = json.load(j)
 
 #SLACK_BEARER_TOKEN = os.environ.get('SLACK_BEARER_TOKEN') ## Get in setting of Streamlit Share
@@ -122,79 +126,108 @@ user_df = load_users_df()
 channel_df = load_channel_df()
 msg_df = load_msg_dict()
 
-st.write(process_msg_data(msg_df, user_df, channel_df))
+total = process_msg_data(msg_df, user_df, channel_df)
+
+# table
+# assignments 
+as_total = total[total.channel_name.str.contains('assignment')]
+as_total = as_total[as_total.DataCracy_role.str.contains('Learner')]
+as_by_channel = as_total.groupby(by=(['user_id','submit_name','channel_id','channel_name']))['github_link'].nunique()
+as_by_user = as_by_channel.groupby(by=(['user_id','submit_name'])).count()
+as_by_user = as_by_user.sort_values(ascending=False)                                 
+as_by_user = as_by_user.reset_index()
 
 
-# Input
-st.sidebar.markdown('## Thông tin')
-user_id = st.sidebar.text_input("Nhập Mã Số Người Dùng", 'U01xxxx')
+# wordcount
+dis_total = total[total.channel_name.str.contains('discuss')]
+dis_total = dis_total[dis_total.DataCracy_role.str.contains('Learner')]
+user_wordcount = dis_total.groupby(by=(['user_id','submit_name'])).wordcount.sum()
+user_wordcount = user_wordcount.sort_values(ascending=False)
+user_wordcount = user_wordcount.reset_index()
+
+# review
+reviewed_total = as_total[(as_total.reply_users != 0) & \
+                          ((as_total.reply_user1 != as_total.user_id) | (as_total.reply_user2 != as_total.user_id))]
+reviewed_total=reviewed_total.loc[reviewed_total.groupby(by=(['user_id','submit_name','channel_id'])).msg_ts.idxmax()]
+# reviewed_total = reviewed_total.reset_index().sort_values(by='channel_id',ascending=False)
+# reviewed_total.rename(columns = {'channel_id':'no of be reviewed'})
+reviewed_total = reviewed_total.groupby(by=(['user_id','submit_name'])).channel_id.nunique().reset_index()
+reviewed_total = reviewed_total.rename(columns = {'channel_id':'time be reviewed'})
+
+# merge
+final = as_by_user.merge(user_wordcount, how='left',left_on=('user_id','submit_name'), right_on = ('user_id','submit_name'))
+final = final.merge(reviewed_total, how='left',left_on=('user_id','submit_name'), right_on = ('user_id','submit_name'))
+final = final.rename(columns={'github_link':'no of assignments'})
+final['% be reviewed'] = final['time be reviewed']/final['no of assignments']*100
+final['% be reviewed']=final['% be reviewed'].round(decimals=1)
+final = final.sort_values(by='no of assignments',ascending=False)
 
 
-valid_user_id = user_df['user_id'].str.contains(user_id).any()
-if valid_user_id:
-    filter_user_df = user_df[user_df.user_id == user_id] ## dis = display =]]
-    filter_msg_df = msg_df[(msg_df.user_id == user_id) | (msg_df.reply_user1 == user_id) | (msg_df.reply_user2 == user_id)]
-    p_msg_df = process_msg_data(filter_msg_df, user_df, channel_df)
+# UI
 
-    ## Submission
-    submit_df = p_msg_df[p_msg_df.channel_name.str.contains('assignment')]
-    submit_df = submit_df[submit_df.DataCracy_role.str.contains('Learner')]
-    submit_df = submit_df[submit_df.user_id == user_id]
-    latest_ts = submit_df.groupby(['channel_name', 'user_id']).msg_ts.idxmax() ## -> Latest ts
-    submit_df = submit_df.loc[latest_ts]
-    dis_cols1 = ['channel_name', 'created_at','msg_date','msg_time','reply_user_count', 'reply1_name']
-    
-    # Review
-    review_df = p_msg_df[p_msg_df.user_id != user_id] ##-> Remove the case self-reply
-    review_df = review_df[review_df.channel_name.str.contains('assignment')]
-    review_df = review_df[review_df.DataCracy_role.str.contains('Learner')]
-    dis_cols2 = ['channel_name', 'created_at','msg_date','msg_time','reply_user_count','submit_name']
-    
-    ## Discussion
-    discuss_df = p_msg_df[p_msg_df.channel_name.str.contains('discuss')]
-    discuss_df = discuss_df.sort_values(['msg_date','msg_time'])
-    dis_cols3 = ['channel_name','msg_date', 'msg_time','wordcount','reply_user_count','reply1_name']
-    
-    st.markdown('Hello **{}**!'.format(list(filter_user_df['real_name'])[0]))
-    st.write(filter_user_df)
-    st.markdown('## Lịch sử Nộp Assignment')
-    st.write(submit_df[dis_cols1])
-    st.markdown('## Lịch sử Review Assignment')
-    st.write(review_df[dis_cols2])
-    st.markdown('## Lịch sử Discussion')
-    st.write(discuss_df[dis_cols3])
+option = st.selectbox(
+    'Information about DATAcracy class',
+     ('All','Top 5','Last 5'))
 
-    # Number cards on Sidebar
-    st.sidebar.markdown(f'''<div class="card text-info bg-info mb-3" style="width: 18rem">
-    <div class="card-body">
-    <h5 class="card-title">ĐÃ NỘP</h5>
-    <p class="card-text">{len(submit_df):02d}</p>
-    </div>
-    </div>''', unsafe_allow_html=True)
-
-    review_cnt = 100 * len(submit_df[submit_df.reply_user_count > 0])/len(submit_df) if len(submit_df) > 0  else 0
-    st.sidebar.markdown(f'''<div class="card text-info bg-info mb-3" style="width: 18rem">
-    <div class="card-body">
-    <h5 class="card-title">ĐƯỢC REVIEW</h5>
-    <p class="card-text">{review_cnt:.0f}%</p>
-    </div>
-    </div>''', unsafe_allow_html=True)
-
-    st.sidebar.markdown(f'''<div class="card text-info bg-info mb-3" style="width: 18rem">
-    <div class="card-body">
-    <h5 class="card-title">ĐÃ REVIEW</h5>
-    <p class="card-text">{len(review_df):02d}</p>
-    </div>
-    </div>''', unsafe_allow_html=True)
-
-    st.sidebar.markdown(f'''<div class="card text-info bg-info mb-3" style="width: 18rem">
-    <div class="card-body">
-    <h5 class="card-title">THẢO LUẬN</h5>
-    <p class="card-text">{sum(discuss_df['wordcount']):,d} chữ</p>
-    </div>
-    </div>''', unsafe_allow_html=True)
-    
+'You are viewing:', option
+if option == 'All':
+    st.write(final)
+elif option == 'Top 5':
+    st.write(final.head())
 else:
-    st.markdown('Không tìm thấy Mã Số {}'.format(user_id))
+    st.write(final.tail())
 
-## Run: streamlit run streamlit/datacracy_slack.py
+# distribution
+st.markdown('Distribution')
+
+agreea = st.button('Distribution of Number of assignments in class')
+if agreea:
+    figa,axa = plt.subplots()
+    axa = sns.distplot(a=final['no of assignments'], kde=False)
+    st.pyplot(figa)
+
+agreew = st.button('Distribution of wordcount of assignments in class')
+if agreew:
+    figw,axw = plt.subplots()
+    axw = sns.distplot(a=final['wordcount'], kde=False)
+    st.pyplot(figw)   
+
+agreep = st.button('Distribution of percentage of assignments reviewed of assignments in class')
+if agreep:
+    figp,axp = plt.subplots()
+    axp = sns.distplot(a=final['% be reviewed'], kde=False)
+    st.pyplot(figp)
+
+agree2D = st.button('2D chart of number of assignments and time be reviewed')    
+if agree2D:
+    ax2D = sns.jointplot(x=final['no of assignments'], y=final['time be reviewed'], kind='kde')
+    st.pyplot(ax2D)
+
+
+# day and time
+new_as_total=as_total.loc[as_total.groupby(by=(['user_id','submit_name','channel_id'])).msg_ts.idxmax()]
+ts_time = new_as_total.msg_ts.reset_index()
+ts_time['dayofweek'] = ts_time.msg_ts.dt.dayofweek
+ts_time['day_name'] = ts_time.msg_ts.dt.day_name()
+ts_time['hour'] = ts_time.msg_ts.dt.hour
+
+# date
+
+agreed = st.button('Distribution of day week submitted assignment')  
+if agreed:
+    figd,axd = plt.subplots()
+    axd = sns.distplot(a=ts_time['dayofweek'], kde=False)
+    axd.set_xticklabels(['','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'])
+    for item in axd.get_xticklabels(): item.set_rotation(90)
+    st.pyplot(figd)
+
+agreeh = st.button('Distribution of hour submitted assignment')  
+if agreeh:
+    figh,axh = plt.subplots()
+    axh = sns.distplot(a=ts_time['hour'], kde=False)
+    plt.xticks([0,6, 12, 18, 24])
+    st.pyplot(figh)
+
+
+# cd OneDrive/Documents/GitHub/atom-assignments
+## Run: streamlit run streamlit/datacracy_slack-thaole.py
